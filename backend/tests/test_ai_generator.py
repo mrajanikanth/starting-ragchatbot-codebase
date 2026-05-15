@@ -90,11 +90,12 @@ class TestDirectResponse:
         assert kwargs["system"]  # non-empty
 
     def test_api_called_with_tools_when_provided(self, generator):
-        """When tools are supplied, they appear in the first API call."""
+        """When tools and tool_manager are supplied, tools appear in the API call."""
         generator.client.messages.create.return_value = make_text_response()
         tools = [{"name": "search_course_content", "description": "...", "input_schema": {}}]
+        mock_tool_manager = MagicMock()
 
-        generator.generate_response(query="Q", tools=tools)
+        generator.generate_response(query="Q", tools=tools, tool_manager=mock_tool_manager)
 
         kwargs = generator.client.messages.create.call_args[1]
         assert "tools" in kwargs
@@ -194,26 +195,6 @@ class TestToolExecution:
         assert result_block["type"] == "tool_result"
         assert result_block["tool_use_id"] == "tid_1"
         assert result_block["content"] == "Found: lesson 1 content"
-
-    def test_second_api_call_has_no_tools_key(self, generator):
-        """Second API call deliberately omits 'tools' to force a text answer."""
-        tool_response = make_tool_use_response()
-        final_response = make_text_response("Done")
-
-        generator.client.messages.create.side_effect = [tool_response, final_response]
-        mock_tool_manager = MagicMock()
-        mock_tool_manager.execute_tool.return_value = "Result"
-
-        generator.generate_response(
-            query="Q",
-            tools=[{"name": "search_course_content"}],
-            tool_manager=mock_tool_manager,
-        )
-
-        second_kwargs = generator.client.messages.create.call_args_list[1][1]
-        assert "tools" not in second_kwargs, (
-            "'tools' key must be absent from the second API call so Claude cannot loop"
-        )
 
     def test_generate_response_returns_text_from_second_call(self, generator):
         """generate_response() returns the text from the second (final) Claude call."""
@@ -316,8 +297,8 @@ class TestToolExecution:
 
         mock_tool_manager.execute_tool.assert_not_called()
 
-    def test_two_api_calls_total_during_tool_use_flow(self, generator):
-        """Exactly two API calls are made: one with tools, one without."""
+    def test_exactly_two_api_calls_for_single_tool_round_then_text(self, generator):
+        """Exactly two API calls when Claude calls one tool then returns text."""
         tool_response = make_tool_use_response()
         final_response = make_text_response("Done")
 
@@ -398,3 +379,218 @@ class TestModelConfiguration:
             f"ANTHROPIC_MODEL '{config.ANTHROPIC_MODEL}' does not match a known Claude 4 pattern. "
             f"Expected one of: {valid_prefixes}"
         )
+
+
+# ---------------------------------------------------------------------------
+# MAX_TOOL_ROUNDS class constant
+# ---------------------------------------------------------------------------
+
+class TestMaxToolRoundsConstant:
+    def test_max_tool_rounds_equals_two(self):
+        """MAX_TOOL_ROUNDS is set to 2."""
+        assert AIGenerator.MAX_TOOL_ROUNDS == 2
+
+    def test_max_tool_rounds_is_int(self):
+        """MAX_TOOL_ROUNDS is an integer."""
+        assert isinstance(AIGenerator.MAX_TOOL_ROUNDS, int)
+
+
+# ---------------------------------------------------------------------------
+# Two sequential tool-call rounds
+# ---------------------------------------------------------------------------
+
+class TestTwoRoundToolFlow:
+    """Both loop rounds use a tool; a final no-tools call forces the text answer."""
+
+    def _setup(self, generator):
+        tool_r1 = make_tool_use_response(
+            tool_name="get_course_outline",
+            tool_input={"course_name": "Python 101"},
+            tool_id="tid_r1",
+        )
+        tool_r2 = make_tool_use_response(
+            tool_name="search_course_content",
+            tool_input={"query": "lesson 4 topic"},
+            tool_id="tid_r2",
+        )
+        final = make_text_response("Final synthesised answer")
+        generator.client.messages.create.side_effect = [tool_r1, tool_r2, final]
+
+        mock_tool_manager = MagicMock()
+        mock_tool_manager.execute_tool.side_effect = ["Outline result", "Search result"]
+        return mock_tool_manager
+
+    def test_two_rounds_executes_both_tools(self, generator):
+        """Both tool calls are executed (execute_tool called twice)."""
+        mock_tm = self._setup(generator)
+        generator.generate_response(
+            query="Q",
+            tools=[{"name": "get_course_outline"}, {"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+        assert mock_tm.execute_tool.call_count == 2
+
+    def test_two_rounds_makes_three_api_calls(self, generator):
+        """Exactly 3 API calls: round 0, round 1, final no-tools."""
+        mock_tm = self._setup(generator)
+        generator.generate_response(
+            query="Q",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+        assert generator.client.messages.create.call_count == 3
+
+    def test_two_rounds_third_call_has_no_tools_key(self, generator):
+        """The forced final call omits 'tools' so Claude cannot loop further."""
+        mock_tm = self._setup(generator)
+        generator.generate_response(
+            query="Q",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+        third_kwargs = generator.client.messages.create.call_args_list[2][1]
+        assert "tools" not in third_kwargs
+
+    def test_two_rounds_returns_text_from_final_call(self, generator):
+        """generate_response() returns the text from the final no-tools call."""
+        mock_tm = self._setup(generator)
+        result = generator.generate_response(
+            query="Q",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+        assert result == "Final synthesised answer"
+
+    def test_second_round_messages_include_first_tool_result(self, generator):
+        """The round-1 API call carries the round-0 tool result in its messages."""
+        mock_tm = self._setup(generator)
+        generator.generate_response(
+            query="Q",
+            tools=[{"name": "get_course_outline"}],
+            tool_manager=mock_tm,
+        )
+        second_kwargs = generator.client.messages.create.call_args_list[1][1]
+        messages = second_kwargs["messages"]
+        tool_result_msg = next(
+            (m for m in messages if m.get("role") == "user" and isinstance(m.get("content"), list)),
+            None,
+        )
+        assert tool_result_msg is not None
+        result_block = tool_result_msg["content"][0]
+        assert result_block["type"] == "tool_result"
+        assert result_block["tool_use_id"] == "tid_r1"
+        assert result_block["content"] == "Outline result"
+
+    def test_both_tool_results_present_in_final_messages(self, generator):
+        """The final API call's messages contain tool_result blocks for both rounds."""
+        mock_tm = self._setup(generator)
+        generator.generate_response(
+            query="Q",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+        final_kwargs = generator.client.messages.create.call_args_list[2][1]
+        messages = final_kwargs["messages"]
+        tool_result_msgs = [
+            m for m in messages
+            if m.get("role") == "user" and isinstance(m.get("content"), list)
+        ]
+        assert len(tool_result_msgs) == 2
+        ids = {block["tool_use_id"] for msg in tool_result_msgs for block in msg["content"]}
+        assert "tid_r1" in ids
+        assert "tid_r2" in ids
+
+
+# ---------------------------------------------------------------------------
+# Termination conditions
+# ---------------------------------------------------------------------------
+
+class TestTerminationConditions:
+    def test_loop_exits_early_when_round_one_returns_text(self, generator):
+        """When round 0 returns text (not tool_use), only 2 API calls are made."""
+        tool_r = make_tool_use_response(tool_id="tid_1")
+        text_r = make_text_response("Early answer")
+        generator.client.messages.create.side_effect = [tool_r, text_r]
+        mock_tm = MagicMock()
+        mock_tm.execute_tool.return_value = "R"
+
+        result = generator.generate_response(
+            query="Q",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+
+        assert generator.client.messages.create.call_count == 2
+        assert result == "Early answer"
+
+    def test_loop_exits_early_when_round_two_returns_text(self, generator):
+        """When round 1 returns text, only 3 API calls are made (no forced final call)."""
+        tool_r1 = make_tool_use_response(tool_id="tid_1")
+        tool_r2 = make_tool_use_response(tool_id="tid_2")
+        text_r = make_text_response("Round 2 text answer")
+        generator.client.messages.create.side_effect = [tool_r1, tool_r2, text_r]
+        mock_tm = MagicMock()
+        mock_tm.execute_tool.side_effect = ["R1", "R2"]
+
+        result = generator.generate_response(
+            query="Q",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+
+        assert generator.client.messages.create.call_count == 3
+        assert result == "Round 2 text answer"
+
+    def test_max_rounds_forces_no_tools_final_call(self, generator):
+        """After MAX_TOOL_ROUNDS, a no-tools call is made and its text is returned."""
+        tool_r1 = make_tool_use_response(tool_id="tid_1")
+        tool_r2 = make_tool_use_response(tool_id="tid_2")
+        forced_text = make_text_response("Forced final")
+        generator.client.messages.create.side_effect = [tool_r1, tool_r2, forced_text]
+        mock_tm = MagicMock()
+        mock_tm.execute_tool.side_effect = ["R1", "R2"]
+
+        result = generator.generate_response(
+            query="Q",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tm,
+        )
+
+        assert generator.client.messages.create.call_count == 3
+        final_kwargs = generator.client.messages.create.call_args_list[2][1]
+        assert "tools" not in final_kwargs
+        assert result == "Forced final"
+
+    def test_exception_from_round_two_tool_manager_propagates(self, generator):
+        """A tool manager exception in round 2 propagates out of generate_response."""
+        tool_r1 = make_tool_use_response(tool_id="tid_1")
+        tool_r2 = make_tool_use_response(tool_id="tid_2")
+        generator.client.messages.create.side_effect = [tool_r1, tool_r2]
+        mock_tm = MagicMock()
+        mock_tm.execute_tool.side_effect = ["R1", RuntimeError("DB down in round 2")]
+
+        with pytest.raises(RuntimeError, match="DB down in round 2"):
+            generator.generate_response(
+                query="Q",
+                tools=[{"name": "search_course_content"}],
+                tool_manager=mock_tm,
+            )
+
+    def test_exception_from_round_two_api_call_propagates(self, generator):
+        """An API exception in round 2 propagates out of generate_response."""
+        tool_r1 = make_tool_use_response(tool_id="tid_1")
+        tool_r2 = make_tool_use_response(tool_id="tid_2")
+        generator.client.messages.create.side_effect = [
+            tool_r1,
+            tool_r2,
+            Exception("Rate limit in round 2"),
+        ]
+        mock_tm = MagicMock()
+        mock_tm.execute_tool.side_effect = ["R1", "R2"]
+
+        with pytest.raises(Exception, match="Rate limit in round 2"):
+            generator.generate_response(
+                query="Q",
+                tools=[{"name": "search_course_content"}],
+                tool_manager=mock_tm,
+            )
