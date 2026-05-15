@@ -4,15 +4,16 @@ Tests for AIGenerator tool-calling behaviour in ai_generator.py.
 Covers: direct text responses, tool-use dispatch, second-call message
 structure, no-tools-in-second-call invariant, and exception propagation.
 """
+
 import pytest
 from unittest.mock import MagicMock, patch, call
 
 from ai_generator import AIGenerator
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
 
 def make_text_response(text="Hello world"):
     """Simulate a Claude response that ends with plain text."""
@@ -26,9 +27,9 @@ def make_text_response(text="Hello world"):
     return response
 
 
-def make_tool_use_response(tool_name="search_course_content",
-                           tool_input=None,
-                           tool_id="toolu_abc123"):
+def make_tool_use_response(
+    tool_name="search_course_content", tool_input=None, tool_id="toolu_abc123"
+):
     """Simulate a Claude response that requests a tool call."""
     tool_input = tool_input or {"query": "Python basics"}
 
@@ -57,10 +58,13 @@ def generator():
 # Direct (non-tool) responses
 # ---------------------------------------------------------------------------
 
+
 class TestDirectResponse:
     def test_returns_text_when_stop_reason_is_end_turn(self, generator):
         """generate_response() returns the text block when no tool is needed."""
-        generator.client.messages.create.return_value = make_text_response("Direct answer.")
+        generator.client.messages.create.return_value = make_text_response(
+            "Direct answer."
+        )
 
         result = generator.generate_response(query="What is Python?")
 
@@ -75,8 +79,7 @@ class TestDirectResponse:
         kwargs = generator.client.messages.create.call_args[1]
         messages = kwargs["messages"]
         assert any(
-            m["role"] == "user" and "What is Python?" in m["content"]
-            for m in messages
+            m["role"] == "user" and "What is Python?" in m["content"] for m in messages
         )
 
     def test_api_called_with_system_prompt(self, generator):
@@ -92,10 +95,14 @@ class TestDirectResponse:
     def test_api_called_with_tools_when_provided(self, generator):
         """When tools and tool_manager are supplied, tools appear in the API call."""
         generator.client.messages.create.return_value = make_text_response()
-        tools = [{"name": "search_course_content", "description": "...", "input_schema": {}}]
+        tools = [
+            {"name": "search_course_content", "description": "...", "input_schema": {}}
+        ]
         mock_tool_manager = MagicMock()
 
-        generator.generate_response(query="Q", tools=tools, tool_manager=mock_tool_manager)
+        generator.generate_response(
+            query="Q", tools=tools, tool_manager=mock_tool_manager
+        )
 
         kwargs = generator.client.messages.create.call_args[1]
         assert "tools" in kwargs
@@ -115,8 +122,7 @@ class TestDirectResponse:
         generator.client.messages.create.return_value = make_text_response()
 
         generator.generate_response(
-            query="Q",
-            conversation_history="User: Hi\nAssistant: Hello"
+            query="Q", conversation_history="User: Hi\nAssistant: Hello"
         )
 
         kwargs = generator.client.messages.create.call_args[1]
@@ -143,6 +149,7 @@ class TestDirectResponse:
 # ---------------------------------------------------------------------------
 # Tool-use dispatch and second API call
 # ---------------------------------------------------------------------------
+
 
 class TestToolExecution:
     def test_tool_manager_execute_tool_is_called_on_tool_use(self, generator):
@@ -187,10 +194,16 @@ class TestToolExecution:
         second_kwargs = generator.client.messages.create.call_args_list[1][1]
         messages = second_kwargs["messages"]
         tool_result_msg = next(
-            (m for m in messages if m.get("role") == "user" and isinstance(m.get("content"), list)),
+            (
+                m
+                for m in messages
+                if m.get("role") == "user" and isinstance(m.get("content"), list)
+            ),
             None,
         )
-        assert tool_result_msg is not None, "No user message with tool_result found in second call"
+        assert (
+            tool_result_msg is not None
+        ), "No user message with tool_result found in second call"
         result_block = tool_result_msg["content"][0]
         assert result_block["type"] == "tool_result"
         assert result_block["tool_use_id"] == "tid_1"
@@ -231,7 +244,9 @@ class TestToolExecution:
         second_kwargs = generator.client.messages.create.call_args_list[1][1]
         messages = second_kwargs["messages"]
         assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
-        assert len(assistant_msgs) == 1, "Expected exactly one assistant message in second call"
+        assert (
+            len(assistant_msgs) == 1
+        ), "Expected exactly one assistant message in second call"
 
     def test_exception_from_second_api_call_propagates(self, generator):
         """An exception in the second API call propagates (causes 'query failed')."""
@@ -321,6 +336,7 @@ class TestToolExecution:
         when the first block wasn't a TextBlock.
         """
         from anthropic.types import ToolUseBlock
+
         non_text_block = MagicMock()
         non_text_block.type = "tool_use"
 
@@ -354,6 +370,7 @@ class TestToolExecution:
 # Regression: model ID must be a known-valid Anthropic model
 # ---------------------------------------------------------------------------
 
+
 class TestModelConfiguration:
     def test_model_is_not_deprecated_sonnet_4_date_format(self):
         """
@@ -385,6 +402,7 @@ class TestModelConfiguration:
 # MAX_TOOL_ROUNDS class constant
 # ---------------------------------------------------------------------------
 
+
 class TestMaxToolRoundsConstant:
     def test_max_tool_rounds_equals_two(self):
         """MAX_TOOL_ROUNDS is set to 2."""
@@ -398,6 +416,7 @@ class TestMaxToolRoundsConstant:
 # ---------------------------------------------------------------------------
 # Two sequential tool-call rounds
 # ---------------------------------------------------------------------------
+
 
 class TestTwoRoundToolFlow:
     """Both loop rounds use a tool; a final no-tools call forces the text answer."""
@@ -472,7 +491,11 @@ class TestTwoRoundToolFlow:
         second_kwargs = generator.client.messages.create.call_args_list[1][1]
         messages = second_kwargs["messages"]
         tool_result_msg = next(
-            (m for m in messages if m.get("role") == "user" and isinstance(m.get("content"), list)),
+            (
+                m
+                for m in messages
+                if m.get("role") == "user" and isinstance(m.get("content"), list)
+            ),
             None,
         )
         assert tool_result_msg is not None
@@ -492,11 +515,14 @@ class TestTwoRoundToolFlow:
         final_kwargs = generator.client.messages.create.call_args_list[2][1]
         messages = final_kwargs["messages"]
         tool_result_msgs = [
-            m for m in messages
+            m
+            for m in messages
             if m.get("role") == "user" and isinstance(m.get("content"), list)
         ]
         assert len(tool_result_msgs) == 2
-        ids = {block["tool_use_id"] for msg in tool_result_msgs for block in msg["content"]}
+        ids = {
+            block["tool_use_id"] for msg in tool_result_msgs for block in msg["content"]
+        }
         assert "tid_r1" in ids
         assert "tid_r2" in ids
 
@@ -504,6 +530,7 @@ class TestTwoRoundToolFlow:
 # ---------------------------------------------------------------------------
 # Termination conditions
 # ---------------------------------------------------------------------------
+
 
 class TestTerminationConditions:
     def test_loop_exits_early_when_round_one_returns_text(self, generator):

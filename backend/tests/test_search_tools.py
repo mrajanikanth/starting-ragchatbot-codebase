@@ -4,16 +4,17 @@ Tests for CourseSearchTool.execute() in search_tools.py.
 Covers: result formatting, empty-result handling, error propagation,
 parameter forwarding to VectorStore, and source tracking.
 """
+
 import pytest
 from unittest.mock import MagicMock
 
 from search_tools import CourseSearchTool, ToolManager
 from vector_store import SearchResults
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_results(docs, metas):
     """Convenience constructor for non-empty SearchResults."""
@@ -27,6 +28,7 @@ def make_results(docs, metas):
 # ---------------------------------------------------------------------------
 # CourseSearchTool.execute()
 # ---------------------------------------------------------------------------
+
 
 class TestCourseSearchToolExecute:
     def setup_method(self):
@@ -253,6 +255,7 @@ class TestCourseSearchToolExecute:
 # ---------------------------------------------------------------------------
 # ToolManager integration
 # ---------------------------------------------------------------------------
+
 
 class TestToolManager:
     def test_register_and_execute_tool(self):

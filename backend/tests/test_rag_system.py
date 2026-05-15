@@ -5,15 +5,16 @@ Covers: tool/tool_manager wiring, return-value shape, session history
 integration, source harvesting/reset, and exception propagation paths
 that manifest as 'query failed' in the frontend.
 """
+
 import pytest
 from unittest.mock import MagicMock, patch
 
 from rag_system import RAGSystem
 
-
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def rag():
@@ -47,6 +48,7 @@ def rag():
 # Return-value contract
 # ---------------------------------------------------------------------------
 
+
 class TestQueryReturnValue:
     def test_query_returns_tuple_of_answer_and_sources(self, rag):
         """query() returns a 2-tuple: (answer_str, sources_list)."""
@@ -79,6 +81,7 @@ class TestQueryReturnValue:
 # ---------------------------------------------------------------------------
 # Tool wiring
 # ---------------------------------------------------------------------------
+
 
 class TestToolWiring:
     def test_query_passes_tools_to_ai_generator(self, rag):
@@ -118,19 +121,23 @@ class TestToolWiring:
         """get_last_sources() is called before reset_sources()."""
         call_order = []
         rag.ai_generator.generate_response.return_value = "A"
-        rag.tool_manager.get_last_sources.side_effect = lambda: call_order.append("get") or []
+        rag.tool_manager.get_last_sources.side_effect = (
+            lambda: call_order.append("get") or []
+        )
         rag.tool_manager.reset_sources.side_effect = lambda: call_order.append("reset")
 
         rag.query("Q")
 
-        assert call_order == ["get", "reset"], (
-            "Sources must be retrieved before they are reset"
-        )
+        assert call_order == [
+            "get",
+            "reset",
+        ], "Sources must be retrieved before they are reset"
 
 
 # ---------------------------------------------------------------------------
 # Session / history
 # ---------------------------------------------------------------------------
+
 
 class TestSessionHandling:
     def test_no_history_when_no_session_id(self, rag):
@@ -180,6 +187,7 @@ class TestSessionHandling:
 # ---------------------------------------------------------------------------
 # Exception propagation  ← these map directly to 'query failed' in the UI
 # ---------------------------------------------------------------------------
+
 
 class TestExceptionPropagation:
     def test_exception_from_ai_generator_propagates(self, rag):
