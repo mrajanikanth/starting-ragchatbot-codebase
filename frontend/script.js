@@ -1,6 +1,13 @@
 // API base URL - use relative path to work from any host
 const API_URL = '/api';
 
+// Apply saved theme before first paint
+(function () {
+    if (localStorage.getItem('theme') === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+})();
+
 // Global state
 let currentSessionId = null;
 
@@ -30,8 +37,10 @@ function setupEventListeners() {
     chatInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
     });
-    
-    
+
+    // Theme toggle
+    document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+
     // Suggested questions
     document.querySelectorAll('.suggested-item').forEach(button => {
         button.addEventListener('click', (e) => {
@@ -40,6 +49,24 @@ function setupEventListeners() {
             sendMessage();
         });
     });
+}
+
+function toggleTheme() {
+    const btn = document.getElementById('themeToggle');
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+
+    if (isLight) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'dark');
+    } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('theme', 'light');
+    }
+
+    btn.classList.remove('spinning');
+    void btn.offsetWidth; // force reflow to restart animation
+    btn.classList.add('spinning');
+    btn.addEventListener('animationend', () => btn.classList.remove('spinning'), { once: true });
 }
 
 
