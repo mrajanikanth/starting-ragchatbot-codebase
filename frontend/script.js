@@ -5,7 +5,7 @@ const API_URL = '/api';
 let currentSessionId = null;
 
 // DOM elements
-let chatMessages, chatInput, sendButton, totalCourses, courseTitles;
+let chatMessages, chatInput, sendButton, totalCourses, courseTitles, newChatBtn;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sendButton = document.getElementById('sendButton');
     totalCourses = document.getElementById('totalCourses');
     courseTitles = document.getElementById('courseTitles');
+    newChatBtn = document.getElementById('newChatBtn');
     
     setupEventListeners();
     createNewSession();
@@ -25,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function setupEventListeners() {
     // Chat functionality
     sendButton.addEventListener('click', sendMessage);
+    newChatBtn.addEventListener('click', handleNewChat);
     chatInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
     });
@@ -122,10 +124,12 @@ function addMessage(content, type, sources = null, isWelcome = false) {
     let html = `<div class="message-content">${displayContent}</div>`;
     
     if (sources && sources.length > 0) {
+        const uniqueSources = [...new Set(sources)];
+        const sourceItems = uniqueSources.map(s => `<div class="source-item">${s}</div>`).join('');
         html += `
             <details class="sources-collapsible">
-                <summary class="sources-header">Sources</summary>
-                <div class="sources-content">${sources.join(', ')}</div>
+                <summary class="sources-header">Sources (${uniqueSources.length})</summary>
+                <div class="sources-content">${sourceItems}</div>
             </details>
         `;
     }
@@ -150,6 +154,29 @@ async function createNewSession() {
     currentSessionId = null;
     chatMessages.innerHTML = '';
     addMessage('Welcome to the Course Materials Assistant! I can help you with questions about courses, lessons and specific content. What would you like to know?', 'assistant', null, true);
+}
+
+async function handleNewChat() {
+    const oldSessionId = currentSessionId;
+
+    // Reset UI immediately — no waiting on network
+    createNewSession();
+    newChatBtn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_URL}/session/new`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_session_id: oldSessionId })
+        });
+        if (!response.ok) throw new Error('Failed to create session');
+        const data = await response.json();
+        currentSessionId = data.session_id;
+    } catch (error) {
+        console.warn('New session pre-creation failed:', error.message);
+    } finally {
+        newChatBtn.disabled = false;
+    }
 }
 
 // Load course statistics

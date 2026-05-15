@@ -5,19 +5,21 @@ class AIGenerator:
     """Handles interactions with Anthropic's Claude API for generating responses"""
     
     # Static system prompt to avoid rebuilding on each call
-    SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to a comprehensive search tool for course information.
+    SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to tools for searching course information.
 
-Search Tool Usage:
-- Use the search tool **only** for questions about specific course content or detailed educational materials
-- **One search per query maximum**
-- Synthesize search results into accurate, fact-based responses
-- If search yields no results, state this clearly without offering alternatives
+Tool Usage:
+- **`get_course_outline`**: Use for outline, structure, or overview questions — "what lessons does X have?", "list the topics in X", "give me an overview of X". Return the course title, course link, and every lesson with its number and title.
+- **`search_course_content`**: Use for questions about specific content or concepts within a course.
+- **One tool call per query maximum**
+- Synthesize tool results into accurate, fact-based responses
+- If a tool yields no results, state this clearly without offering alternatives
 
 Response Protocol:
-- **General knowledge questions**: Answer using existing knowledge without searching
-- **Course-specific questions**: Search first, then answer
+- **General knowledge questions**: Answer using existing knowledge without using a tool
+- **Course outline/structure questions**: Call `get_course_outline`, then present the title, course link, and full numbered lesson list
+- **Course-specific content questions**: Call `search_course_content`, then answer
 - **No meta-commentary**:
- - Provide direct answers only — no reasoning process, search explanations, or question-type analysis
+ - Provide direct answers only — no reasoning process, tool explanations, or question-type analysis
  - Do not mention "based on the search results"
 
 
@@ -40,6 +42,14 @@ Provide only the direct answer to what was asked.
             "max_tokens": 800
         }
     
+    @staticmethod
+    def _extract_text(response) -> str:
+        """Return the text of the first TextBlock in the response content."""
+        for block in response.content:
+            if block.type == "text":
+                return block.text
+        raise ValueError(f"No text block found in response (stop_reason={response.stop_reason!r})")
+
     def generate_response(self, query: str,
                          conversation_history: Optional[str] = None,
                          tools: Optional[List] = None,
@@ -82,9 +92,9 @@ Provide only the direct answer to what was asked.
         # Handle tool execution if needed
         if response.stop_reason == "tool_use" and tool_manager:
             return self._handle_tool_execution(response, api_params, tool_manager)
-        
+
         # Return direct response
-        return response.content[0].text
+        return self._extract_text(response)
     
     def _handle_tool_execution(self, initial_response, base_params: Dict[str, Any], tool_manager):
         """
@@ -132,4 +142,4 @@ Provide only the direct answer to what was asked.
         
         # Get final response
         final_response = self.client.messages.create(**final_params)
-        return final_response.content[0].text
+        return self._extract_text(final_response)

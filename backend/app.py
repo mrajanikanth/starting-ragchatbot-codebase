@@ -51,6 +51,12 @@ class CourseStats(BaseModel):
     total_courses: int
     course_titles: List[str]
 
+class NewSessionRequest(BaseModel):
+    old_session_id: Optional[str] = None
+
+class NewSessionResponse(BaseModel):
+    session_id: str
+
 # API Endpoints
 
 @app.post("/api/query", response_model=QueryResponse)
@@ -82,6 +88,17 @@ async def get_course_stats():
             total_courses=analytics["total_courses"],
             course_titles=analytics["course_titles"]
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/session/new", response_model=NewSessionResponse)
+async def create_new_session(request: NewSessionRequest):
+    """Delete the old session (if any) and create a fresh one"""
+    try:
+        if request.old_session_id:
+            rag_system.session_manager.delete_session(request.old_session_id)
+        new_session_id = rag_system.session_manager.create_session()
+        return NewSessionResponse(session_id=new_session_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
